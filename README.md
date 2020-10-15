@@ -44,6 +44,14 @@ with arguments it can also send signals indicating that a notification was
 closed, or if an action was performed on the notification. This program will
 not do anything in particular with the CloseNotification message.
 
+Usage:
+  notify [options] [<format>]
+  notify send <id> (close <reason> | action <action_key>)
+
+Options:
+  -h --help   Show this screen.
+  -f --file <file>   File to output messages to (errors will still go to stderr)
+
 The format that can be supplied is a fairly simple replacement format for how
 to output the notifications. It will perform these replacements:
 {appName} -> The name of the app
@@ -62,12 +70,4 @@ to output the notifications. It will perform these replacements:
 
 If no format is specified, this format is used:
   {appName}: {summary} ({hints:urgency:low:normal:critical})
-
-Usage:
-  notify [options] [<format>]
-  notify send <id> (close <reason> | action <action_key>)
-
-Options:
-  -h --help   Show this screen.
-  -f --file <file>   File to output messages to (errors will still go to stderr)
 ```

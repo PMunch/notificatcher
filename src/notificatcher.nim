@@ -1,4 +1,4 @@
-import dbus, dbus/loop, dbus/def, tables, strutils
+import dbus, dbus/loop, dbus/def, tables, strutils, times
 
 type NotificationFetcher = ref object
   id: uint32
@@ -77,6 +77,27 @@ proc toInt(val: DbusValue): uint =
   else:
     return 0
 
+proc splitColon(str: string): seq[string] =
+  result.add ""
+  var escape = false
+  for c in str:
+    case c:
+    of ':':
+      if escape:
+        result[^1].add c
+        escape = false
+      else:
+        result.add ""
+    of '\\':
+      if escape:
+        result[^1].add c
+        escape = false
+      else:
+        escape = true
+    else:
+      result[^1].add c
+      escape = false
+
 proc Notify(self: NotificationFetcher, appName: string, replacesId: uint32, appIcon, summary, body: string, actions: seq[string], hints: Table[string, DbusValue], expireTimeout: int32): uint32 =
   if replacesId == 0:
     inc self.id
@@ -93,7 +114,7 @@ proc Notify(self: NotificationFetcher, appName: string, replacesId: uint32, appI
     if hintsStart != -1:
       let
         hintsStop = str.find("}", hintsStart)
-        value = str[hintsStart + 1 .. hintsStop - 1].split(":")
+        value = str[hintsStart + 1 .. hintsStop - 1].splitColon
       if hints.hasKey value[1]:
         let
           replacement = if value.len == 2:
@@ -103,6 +124,16 @@ proc Notify(self: NotificationFetcher, appName: string, replacesId: uint32, appI
         str = str.replace(str[hintsStart .. hintsStop], replacement)
       else:
         str = str.replace(str[hintsStart .. hintsStop], "")
+    let timeStart = str.find("{time")
+    if timeStart != -1:
+      let
+        timeStop = str.find("}", timeStart)
+        format = str[timeStart + 1 .. timeStop - 1].splitColon
+        time = getTime()
+      if format.len > 1:
+        str = str.replace(str[timeStart .. timeStop], time.format(format[1]))
+      else:
+        str = str.replace(str[timeStart .. timeStop], "")
     str = str.unescape("", "")
     self.output.writeLine str
     self.output.flushFile()
@@ -183,6 +214,14 @@ with arguments it can also send signals indicating that a notification was
 closed, or if an action was performed on the notification. This program will
 not do anything in particular with the CloseNotification message.
 
+Usage:
+  notify [options] [<format>]
+  notify send <id> (close <reason> | action <action_key>)
+
+Options:
+  -h --help   Show this screen.
+  -f --file <file>   File to output messages to (errors will still go to stderr)
+
 The format that can be supplied is a fairly simple replacement format for how
 to output the notifications. It will perform these replacements:
 {appName} -> The name of the app
@@ -198,17 +237,11 @@ to output the notifications. It will perform these replacements:
 {hints:<hint name>} -> A named hint from the table of hints, after the hint
   name you can also supply a list of string separated by colons which will be
   selected by the hint as an integer, e.g. {hints:urgency:low:normal:critical}.
+{time:<format>} -> The time of the notification as recorded upon receival,
+  format is a string to format by, as specified in the Nim times module.
 
 If no format is specified, this format is used:
   {appName}: {summary} ({hints:urgency:low:normal:critical})
-
-Usage:
-  notify [options] [<format>]
-  notify send <id> (close <reason> | action <action_key>)
-
-Options:
-  -h --help   Show this screen.
--f --file <file>   File to output messages to (errors will still go to stderr)
 """
 when isMainModule:
   import docopt
