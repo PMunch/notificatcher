@@ -217,8 +217,8 @@ closed, or if an action was performed on the notification. This program will
 not do anything in particular with the CloseNotification message.
 
 Usage:
-  notify [options] [<format>]
-  notify send <id> (close <reason> | action <action_key>)
+  notificatcher [options] [<format>]
+  notificatcher send <id> (close <reason> | action <action_key>)
 
 Options:
   -h --help          Show this screen.
