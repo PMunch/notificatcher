@@ -38,6 +38,8 @@ to run `less -r` with the notifications file before clearing it with
 Easiest way to figure it out is by checking out the help message:
 
 ```
+Notificatcher 0.2.0
+
 Freedesktop notifications interface. When run without arguments it will simply
 output all notifications to the terminal one notification per line. If supplied
 with arguments it can also send signals indicating that a notification was
@@ -49,7 +51,8 @@ Usage:
   notify send <id> (close <reason> | action <action_key>)
 
 Options:
-  -h --help   Show this screen.
+  -h --help          Show this screen.
+  -v --version       Show the version
   -f --file <file>   File to output messages to (errors will still go to stderr)
 
 The format that can be supplied is a fairly simple replacement format for how
@@ -67,6 +70,8 @@ to output the notifications. It will perform these replacements:
 {hints:<hint name>} -> A named hint from the table of hints, after the hint
   name you can also supply a list of string separated by colons which will be
   selected by the hint as an integer, e.g. {hints:urgency:low:normal:critical}.
+{time:<format>} -> The time of the notification as recorded upon receival,
+  format is a string to format by, as specified in the Nim times module.
 
 If no format is specified, this format is used:
   {appName}: {summary} ({hints:urgency:low:normal:critical})

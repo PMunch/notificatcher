@@ -208,6 +208,8 @@ proc default(format, file: string) =
   mainLoop.runForever()
 
 let doc = """
+Notificatcher 0.2.0
+
 Freedesktop notifications interface. When run without arguments it will simply
 output all notifications to the terminal one notification per line. If supplied
 with arguments it can also send signals indicating that a notification was
@@ -219,7 +221,8 @@ Usage:
   notify send <id> (close <reason> | action <action_key>)
 
 Options:
-  -h --help   Show this screen.
+  -h --help          Show this screen.
+  -v --version       Show the version
   -f --file <file>   File to output messages to (errors will still go to stderr)
 
 The format that can be supplied is a fairly simple replacement format for how
@@ -248,7 +251,7 @@ when isMainModule:
   import docopt/dispatch
   import strutils, sequtils
 
-  let args = docopt(doc, version = "Freedesktop notifications interface 1.0")
+  let args = docopt(doc, version = "Notificatcher 0.2.0")
   if not args.dispatchProc(sendClose, "send", "close") or
     args.dispatchProc(sendAction, "send", "action"):
     default($args["<format>"], $args["--file"])
