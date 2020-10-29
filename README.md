@@ -4,12 +4,12 @@ Want to integrate notifications into your Desktop Environment-less Linux
 set-up? Look no further!
 
 # What is Notificatcher
-Notificatcher is a very simple program that interfaces
-with dbus to read Freedesktop notifications and output them in whatever format
-you specify. Whether you want to simply dump them to a file, or display them in
-a status bar or use a third-party program to make them pop up on screen is
-entirely up to you. Notificatcher is built to do a single task, and to do it
-well.
+Notificatcher is a very simple program that interfaces with dbus to read
+Freedesktop notifications and output them in whatever format you specify and run
+any program or script you desire.  Whether you want to simply dump them to a
+file, or display them in a status bar or use a third-party program to make them
+pop up on screen is entirely up to you. Notificatcher is built to do a single
+task, and to do it well.
 
 # But why?
 It all started when I switched to using Nimdow as my Window Manager. Previously
@@ -38,8 +38,7 @@ to run `less -r` with the notifications file before clearing it with
 Easiest way to figure it out is by checking out the help message:
 
 ```
-Notificatcher 0.2.0
-
+Notificatcher 0.3.0
 Freedesktop notifications interface. When run without arguments it will simply
 output all notifications to the terminal one notification per line. If supplied
 with arguments it can also send signals indicating that a notification was
@@ -51,11 +50,21 @@ Usage:
   notificatcher send <id> (close <reason> | action <action_key>)
 
 Options:
-  -h --help          Show this screen.
-  -v --version       Show the version
-  -f --file <file>   File to output messages to (errors will still go to stderr)
+  -h --help           Show this screen
+  -v --version        Show the version
+  -f --file <file>    File to output messages to
+  -r --run <program>  Program to run for each notification
 
-The format that can be supplied is a fairly simple replacement format for how
+If a filename with a replacement pattern is passed, the replacements will be
+done for every notification and the notification will be written into that
+file. Otherwise the file will be opened right away and be continously written
+to as the program runs. If no file is specified, output will go to stdout.
+Error messages will always be written to stderr.
+
+The run parameter can be used to specify a program to be run for every
+notification. The program string can contain a replacement pattern.
+
+The format that can be supplied is a fairly simple replacement pattern for how
 to output the notifications. It will perform these replacements:
 {appName} -> The name of the app
 {replacesId} -> ID of the notification this notification replaces
@@ -72,6 +81,8 @@ to output the notifications. It will perform these replacements:
   selected by the hint as an integer, e.g. {hints:urgency:low:normal:critical}.
 {time:<format>} -> The time of the notification as recorded upon receival,
   format is a string to format by, as specified in the Nim times module.
+{file} -> The name of the output file (this is not available when formatting a
+  file name for obvious reasons).
 
 If no format is specified, this format is used:
   {appName}: {summary} ({hints:urgency:low:normal:critical})

@@ -1,17 +1,23 @@
-import dbus, dbus/loop, dbus/def, tables, strutils, times
+import dbus, dbus/loop, dbus/def, tables, strutils, times, os, osproc
+
+const NimblePkgVersion {.strdefine.} = ""
 
 type NotificationFetcher = ref object
   id: uint32
   bus: Bus
   output: File
+  fileFormat: string
+  runFormat: string
   format: string
 
-proc newNotificationFetcher(bus: Bus, output: File, format: string): NotificationFetcher =
+proc newNotificationFetcher(bus: Bus, output: File, format, fileFormat, runFormat: string): NotificationFetcher =
   new result
   result.id = 0
   result.bus = bus
   result.output = output
   result.format = format
+  result.fileFormat = fileFormat
+  result.runFormat = runFormat
 
 proc `$`*(val: DbusValue): string =
   case val.kind
@@ -98,45 +104,62 @@ proc splitColon(str: string): seq[string] =
       result[^1].add c
       escape = false
 
+template formatString(stringToFormat: string, withFile = true): string =
+  var str = stringToFormat.multiReplace(("\\n", "\n"), ("\\t", "\t"),
+    ("\\a", "\a"), ("\\b", "\b"), ("\\v", "\v"), ("\\f", "\f"),
+    ("\\c", "\c"), ("\\e", "\e"), ("{appName}", appName),
+    ("{replacesId}", $replacesId), ("{appIcon}", appIcon),
+    ("{summary}", summary), ("{body}", body),
+    ("{expireTimeout}", $expireTimeout), ("{assignedId}", $self.id),
+    ("{actions}", actions.join(", ")))
+  when withFile:
+    str = str.replace("{file}", fileName)
+  let hintsStart = str.find("{hints")
+  if hintsStart != -1:
+    let
+      hintsStop = str.find("}", hintsStart)
+      value = str[hintsStart + 1 .. hintsStop - 1].splitColon
+    if hints.hasKey value[1]:
+      let
+        replacement = if value.len == 2:
+          $hints[value[1]].variantValue
+        else:
+          value[min(2 + hints[value[1]].variantValue.toInt, value.high.uint)]
+      str = str.replace(str[hintsStart .. hintsStop], replacement)
+    else:
+      str = str.replace(str[hintsStart .. hintsStop], "")
+  let timeStart = str.find("{time")
+  if timeStart != -1:
+    let
+      timeStop = str.find("}", timeStart)
+      format = str[timeStart + 1 .. timeStop - 1].splitColon
+      time = getTime()
+    if format.len > 1:
+      str = str.replace(str[timeStart .. timeStop], time.format(format[1]))
+    else:
+      str = str.replace(str[timeStart .. timeStop], "")
+  str = str.unescape("", "")
+  str
+
 proc Notify(self: NotificationFetcher, appName: string, replacesId: uint32, appIcon, summary, body: string, actions: seq[string], hints: Table[string, DbusValue], expireTimeout: int32): uint32 =
   if replacesId == 0:
     inc self.id
 
   try:
-    var str = self.format.multiReplace(("\\n", "\n"), ("\\t", "\t"),
-      ("\\a", "\a"), ("\\b", "\b"), ("\\v", "\v"), ("\\f", "\f"),
-      ("\\c", "\c"), ("\\e", "\e"), ("{appName}", appName),
-      ("{replacesId}", $replacesId), ("{appIcon}", appIcon),
-      ("{summary}", summary), ("{body}", body),
-      ("{expireTimeout}", $expireTimeout), ("{assignedId}", $self.id),
-      ("{actions}", actions.join(", ")))
-    let hintsStart = str.find("{hints")
-    if hintsStart != -1:
-      let
-        hintsStop = str.find("}", hintsStart)
-        value = str[hintsStart + 1 .. hintsStop - 1].splitColon
-      if hints.hasKey value[1]:
-        let
-          replacement = if value.len == 2:
-            $hints[value[1]].variantValue
-          else:
-            value[min(2 + hints[value[1]].variantValue.toInt, value.high.uint)]
-        str = str.replace(str[hintsStart .. hintsStop], replacement)
-      else:
-        str = str.replace(str[hintsStart .. hintsStop], "")
-    let timeStart = str.find("{time")
-    if timeStart != -1:
-      let
-        timeStop = str.find("}", timeStart)
-        format = str[timeStart + 1 .. timeStop - 1].splitColon
-        time = getTime()
-      if format.len > 1:
-        str = str.replace(str[timeStart .. timeStop], time.format(format[1]))
-      else:
-        str = str.replace(str[timeStart .. timeStop], "")
-    str = str.unescape("", "")
-    self.output.writeLine str
-    self.output.flushFile()
+    let
+      fileName = formatString(self.fileFormat, withFile = false)
+      str = formatString(self.format)
+    if self.output == nil: createDir(fileName.splitFile.dir)
+    let output =
+      if self.output != nil: self.output
+      else: open(fileName, fmAppend)
+    output.writeLine str
+    output.flushFile()
+    if output != self.output:
+      output.close()
+    if self.runFormat.len != 0:
+      let runCommand = formatString(self.runFormat)
+      discard startProcess(runCommand, options = {poDaemon, poEvalCommand})
   except Exception as e:
     stderr.writeLine e.name
     stderr.writeLine e.msg
@@ -177,10 +200,10 @@ notificationFetcherDef.addMethod(GetCapabilities, [], [("capabilities", seq[stri
 notificationFetcherDef.addMethod(CloseNotification, [("id", uint32)], [])
 notificationFetcherDef.addMethod(GetServerInformation, [], [("name", string), ("url", string), ("version", string), ("number", string)])
 
-template setup(output: File, format = "nil") =
+template setup(output: File, format = "nil", fileFormat, run = "") =
   let bus {.inject.} = getBus(dbus.DBUS_BUS_SESSION)
 
-  let notificationFetcher {.inject.} = newNotificationFetcher(bus, output, format)
+  let notificationFetcher {.inject.} = newNotificationFetcher(bus, output, format, fileFormat, run)
   let notificationFetcherObj = newObjectImpl(bus)
   notificationFetcherObj.addInterface("org.freedesktop.Notifications", notificationFetcherDef, notificationFetcher)
 
@@ -195,20 +218,26 @@ proc sendAction(id: uint32, actionKey: string) =
   setup(stdout)
   notificationFetcher.invokeAction(id, actionKey)
 
-proc default(format, file: string) =
+proc default(format, file, run: string) =
   var
     fmt =
       if format == "nil": "{appName}: {summary} ({hints:urgency:low:normal:critical})"
       else: format
+    isFileFormat = (file.multiReplace(("{appName}", ""), ("{replacesId}", ""),
+      ("{appIcon}", ""), ("{summary}", ""), ("{body}", ""),
+      ("{expireTimeout}", ""), ("{assignedId}", ""), ("{actions}", "")).len != file.len)
     output =
-      if file == "nil": stdout
-      else: open(file, fmAppend)
-  setup(output, fmt)
+      if isFileFormat or file.find("{hints") != -1:
+        nil
+      else:
+        if file == "nil": stdout
+        else: open(file, fmAppend)
+  setup(output, fmt, file, run)
   let mainLoop = MainLoop.create(bus)
   mainLoop.runForever()
 
 let doc = """
-Notificatcher 0.2.0
+Notificatcher """ & NimblePkgVersion & """
 
 Freedesktop notifications interface. When run without arguments it will simply
 output all notifications to the terminal one notification per line. If supplied
@@ -221,11 +250,21 @@ Usage:
   notificatcher send <id> (close <reason> | action <action_key>)
 
 Options:
-  -h --help          Show this screen.
-  -v --version       Show the version
-  -f --file <file>   File to output messages to (errors will still go to stderr)
+  -h --help           Show this screen
+  -v --version        Show the version
+  -f --file <file>    File to output messages to
+  -r --run <program>  Program to run for each notification
 
-The format that can be supplied is a fairly simple replacement format for how
+If a filename with a replacement pattern is passed, the replacements will be
+done for every notification and the notification will be written into that
+file. Otherwise the file will be opened right away and be continously written
+to as the program runs. If no file is specified, output will go to stdout.
+Error messages will always be written to stderr.
+
+The run parameter can be used to specify a program to be run for every
+notification. The program string can contain a replacement pattern.
+
+The format that can be supplied is a fairly simple replacement pattern for how
 to output the notifications. It will perform these replacements:
 {appName} -> The name of the app
 {replacesId} -> ID of the notification this notification replaces
@@ -242,6 +281,8 @@ to output the notifications. It will perform these replacements:
   selected by the hint as an integer, e.g. {hints:urgency:low:normal:critical}.
 {time:<format>} -> The time of the notification as recorded upon receival,
   format is a string to format by, as specified in the Nim times module.
+{file} -> The name of the output file (this is not available when formatting a
+  file name for obvious reasons).
 
 If no format is specified, this format is used:
   {appName}: {summary} ({hints:urgency:low:normal:critical})
@@ -251,7 +292,7 @@ when isMainModule:
   import docopt/dispatch
   import strutils, sequtils
 
-  let args = docopt(doc, version = "Notificatcher 0.2.0")
+  let args = docopt(doc, version = "Notificatcher " & NimblePkgVersion)
   if not args.dispatchProc(sendClose, "send", "close") or
     args.dispatchProc(sendAction, "send", "action"):
-    default($args["<format>"], $args["--file"])
+    default($args["<format>"], $args["--file"], $args["--run"])
