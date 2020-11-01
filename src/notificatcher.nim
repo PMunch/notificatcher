@@ -157,7 +157,7 @@ proc Notify(self: NotificationFetcher, appName: string, replacesId: uint32, appI
     output.flushFile()
     if output != self.output:
       output.close()
-    if self.runFormat.len != 0:
+    if self.runFormat != "nil":
       let runCommand = formatString(self.runFormat)
       discard startProcess(runCommand, options = {poDaemon, poEvalCommand})
   except Exception as e:
@@ -167,8 +167,9 @@ proc Notify(self: NotificationFetcher, appName: string, replacesId: uint32, appI
 
   return self.id
 
+## TODO: Support passing capabilities
 proc GetCapabilities(self: NotificationFetcher): seq[string] =
-  return @["body", "actions"]
+  return @["body", "actions", "action-icons"]
 
 proc CloseNotification(self: NotificationFetcher, id: uint32) =
   self.output.writeLine "id: ", id
@@ -200,7 +201,7 @@ notificationFetcherDef.addMethod(GetCapabilities, [], [("capabilities", seq[stri
 notificationFetcherDef.addMethod(CloseNotification, [("id", uint32)], [])
 notificationFetcherDef.addMethod(GetServerInformation, [], [("name", string), ("url", string), ("version", string), ("number", string)])
 
-template setup(output: File, format = "nil", fileFormat, run = "") =
+template setup(output: File, format = "nil", fileFormat, run = "nil") =
   let bus {.inject.} = getBus(dbus.DBUS_BUS_SESSION)
 
   let notificationFetcher {.inject.} = newNotificationFetcher(bus, output, format, fileFormat, run)
