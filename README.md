@@ -38,7 +38,8 @@ to run `less -r` with the notifications file before clearing it with
 Easiest way to figure it out is by checking out the help message:
 
 ```
-Notificatcher 0.3.0
+Notificatcher 0.4.0
+
 Freedesktop notifications interface. When run without arguments it will simply
 output all notifications to the terminal one notification per line. If supplied
 with arguments it can also send signals indicating that a notification was
@@ -50,10 +51,12 @@ Usage:
   notificatcher send <id> (close <reason> | action <action_key>)
 
 Options:
-  -h --help           Show this screen
-  -v --version        Show the version
-  -f --file <file>    File to output messages to
-  -r --run <program>  Program to run for each notification
+  -h --help                Show this screen
+  -v --version             Show the version
+  -f --file <file>         File to output messages to
+  -r --run <program>       Program to run for each notification
+  -i --iconPath <path>     The path to store icons in
+  -c --capabilities <cap>  A list of capabilities to declare
 
 If a filename with a replacement pattern is passed, the replacements will be
 done for every notification and the notification will be written into that
@@ -77,8 +80,11 @@ to output the notifications. It will perform these replacements:
 {assignedId} -> The ID assigned to this notification
 {actions} -> The list of actions, separated by commas
 {hints:<hint name>} -> A named hint from the table of hints, after the hint
-  name you can also supply a list of string separated by colons which will be
+  name you can also supply a list of strings separated by colons which will be
   selected by the hint as an integer, e.g. {hints:urgency:low:normal:critical}.
+  For any of the image-data hints you will get a file URI to a PNG as the
+  output instead of a buffer. The icon will be stored in the iconPath, if no
+  icon path is set the image-data won't return anything.
 {time:<format>} -> The time of the notification as recorded upon receival,
   format is a string to format by, as specified in the Nim times module.
 {file} -> The name of the output file (this is not available when formatting a
