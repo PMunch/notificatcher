@@ -12,6 +12,6 @@ bin           = @["notificatcher"]
 # Dependencies
 
 requires "nim >= 1.2.6"
-requires "https://github.com/zielmicha/nim-dbus"
+requires "https://github.com/PMunch/nim-dbus#newernim"
 requires "https://github.com/PMunch/docopt.nim#dispatch"
 requires "nimPNG"
