@@ -8,23 +8,31 @@ type NotificationFetcher = ref object
   bus: Bus
   output: File
   fileFormat: string
+  closeOutput: File
+  closeFileFormat: string
   runFormat: string
+  closeRunFormat: string
+  closeFormat: string
   format: string
   iconPath: string
   capabilities: seq[string]
 
 var capabilites: seq[string]
 
-proc newNotificationFetcher(bus: Bus, output: File,
-    format, fileFormat, runFormat, iconPath: string,
-    capabilities: seq[string]): NotificationFetcher =
+proc newNotificationFetcher(bus: Bus, output, closeOutput: File,
+    format, closeFormat, fileFormat, closeFileFormat, runFormat, closeRunFormat,
+    iconPath: string, capabilities: seq[string]): NotificationFetcher =
   new result
   result.id = 0
   result.bus = bus
   result.output = output
   result.format = format
+  result.closeFormat = closeFormat
+  result.closeOutput = closeOutput
+  result.closeFileFormat = closeFileFormat
   result.fileFormat = fileFormat
   result.runFormat = runFormat
+  result.closeRunFormat = closeRunFormat
   result.iconPath = iconPath
   result.capabilities = capabilites
 
@@ -113,33 +121,36 @@ proc splitColon(str: string): seq[string] =
       result[^1].add c
       escape = false
 
-template formatString(stringToFormat: string, withFile = true): string =
+template formatString(stringToFormat: string, withFile = true,
+    withHints = true): string =
   var str = stringToFormat.multiReplace(("\\n", "\n"), ("\\t", "\t"),
     ("\\a", "\a"), ("\\b", "\b"), ("\\v", "\v"), ("\\f", "\f"),
     ("\\c", "\c"), ("\\e", "\e"), ("{appName}", appName),
     ("{replacesId}", $replacesId), ("{appIcon}", appIcon),
     ("{summary}", summary), ("{body}", body),
-    ("{expireTimeout}", $expireTimeout), ("{assignedId}", $self.id),
-    ("{actions}", actions.join(", ")))
+    ("{expireTimeout}", $expireTimeout),
+    ("{id}", if closesId == 0: $self.id else: $closesId),
+    ("{actions}", actions.join(", ")), ("{pid}", $pid))
   when withFile:
     str = str.replace("{file}", fileName)
-  let hintsStart = str.find("{hints")
-  if hintsStart != -1:
-    let
-      hintsStop = str.find("}", hintsStart)
-      value = str[hintsStart + 1 .. hintsStop - 1].splitColon
-    if hints.hasKey value[1]:
-      if savedIcons.hasKey value[1]:
-        str = str.replace(str[hintsStart .. hintsStop], savedIcons[value[1]])
+  when withHints:
+    let hintsStart = str.find("{hints")
+    if hintsStart != -1:
+      let
+        hintsStop = str.find("}", hintsStart)
+        value = str[hintsStart + 1 .. hintsStop - 1].splitColon
+      if hints.hasKey value[1]:
+        if savedIcons.hasKey value[1]:
+          str = str.replace(str[hintsStart .. hintsStop], savedIcons[value[1]])
+        else:
+          let
+            replacement = if value.len == 2:
+              $hints[value[1]].variantValue
+            else:
+              value[min(2 + hints[value[1]].variantValue.toInt, value.high.uint)]
+          str = str.replace(str[hintsStart .. hintsStop], replacement)
       else:
-        let
-          replacement = if value.len == 2:
-            $hints[value[1]].variantValue
-          else:
-            value[min(2 + hints[value[1]].variantValue.toInt, value.high.uint)]
-        str = str.replace(str[hintsStart .. hintsStop], replacement)
-    else:
-      str = str.replace(str[hintsStart .. hintsStop], "")
+        str = str.replace(str[hintsStart .. hintsStop], "")
   let timeStart = str.find("{time")
   if timeStart != -1:
     let
@@ -186,20 +197,42 @@ proc Notify(self: NotificationFetcher, appName: string, replacesId: uint32,
               expandFilename(self.iconPath & "/" & name)
 
     let
-      fileName = formatString(self.fileFormat, withFile = false)
-      str = formatString(self.format)
-    if self.output == nil: createDir(fileName.splitFile.dir)
-    let output =
-      if self.output != nil: self.output
-      else: open(fileName, fmAppend)
+      closesId = 0
+      fileHasPid = self.fileFormat.contains("{pid}")
+      formatHasPid = self.format.contains("{pid}")
+      hasPid = formatHasPid or fileHasPid
 
-    output.writeLine str
-    output.flushFile()
-    if output != self.output:
-      output.close()
-    if self.runFormat != "nil":
-      let runCommand = formatString(self.runFormat)
-      discard startProcess(runCommand, options = {poDaemon, poEvalCommand})
+    template formatFile(): string =
+      formatString(self.fileFormat, withFile = false)
+
+    type Step = enum Output, Run, Done
+    var
+      pid = 0
+      fileName = if fileHasPid: "" else: formatFile()
+      step = if hasPid: Run else: Output
+
+    while true:
+      case step:
+      of Output:
+        # Write output
+        let str = formatString(self.format)
+        if fileHasPid: fileName = formatFile()
+        if self.output == nil: createDir(fileName.splitFile.dir)
+        let output =
+          if self.output != nil: self.output
+          else: open(fileName, fmAppend)
+        output.writeLine str
+        output.flushFile()
+        if output != self.output:
+          output.close()
+        step = if hasPid: Done else: Run
+      of Run:
+        # Launch program
+        let runCommand = formatString(self.runFormat)
+        if self.runFormat != "nil":
+          pid = startProcess(runCommand, options = {poDaemon, poEvalCommand}).processId
+        step = if hasPid: Output else: Done
+      of Done: break
   except Exception as e:
     stderr.writeLine e.name
     stderr.writeLine e.msg
@@ -207,26 +240,58 @@ proc Notify(self: NotificationFetcher, appName: string, replacesId: uint32,
 
   return self.id
 
-## TODO: Support passing capabilities
 proc GetCapabilities(self: NotificationFetcher): seq[string] =
   return self.capabilities
 
-proc CloseNotification(self: NotificationFetcher, id: uint32) =
-  #self.output.writeLine "id: ", id
-  #self.output.flushFile()
-  discard
+proc CloseNotification(self: NotificationFetcher, closesId: uint32) =
+  try:
+    let
+      appName = ""
+      replacesId = 0
+      appIcon = ""
+      summary = ""
+      body = ""
+      actions: seq[string] = @[]
+      expireTimeout = 0
+      pid = 0
+      fileName =
+        formatString(self.fileFormat, withFile = false, withHints = false)
+      closeFileName =
+        formatString(self.closeFileFormat, withFile = false, withHints = false)
+      str = formatString(self.closeFormat, withHints = false)
+      output =
+        if self.closeOutput != nil: self.closeOutput
+        elif self.closeFileFormat != "nil": open(closeFileName, fmAppend)
+        else:
+          if self.output != nil: self.output
+          else: open(fileName, fmAppend)
 
-proc GetServerInformation(self: NotificationFetcher): tuple[name: string, url: string, version: string, number: string] =
+    output.writeLine str
+    output.flushFile()
+    if output != self.output:
+      output.close()
+    if self.closeRunFormat != "nil":
+      let closeRunCommand = formatString(self.closeRunFormat, withHints = false)
+      discard startProcess(closeRunCommand, options = {poDaemon, poEvalCommand})
+  except Exception as e:
+    stderr.writeLine e.name
+    stderr.writeLine e.msg
+    stderr.writeLine e.getStackTrace
+
+proc GetServerInformation(self: NotificationFetcher): tuple[name: string,
+    url: string, version: string, number: string] =
   return ("notificatcher", "https://peterme.net", NimblePkgVersion, "1")
 
 proc closeNotification(self: NotificationFetcher, id, reason: uint32) =
-  var msg = makeSignal("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "NotificationClosed")
+  var msg = makeSignal("/org/freedesktop/DBus", "org.freedesktop.Notifications",
+    "NotificationClosed")
   msg.append(id)
   msg.append(reason)
   discard self.bus.sendMessage msg
 
 proc invokeAction(self: NotificationFetcher, id: uint32, action: string) =
-  var msg = makeSignal("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "ActionInvoked")
+  var msg = makeSignal("/org/freedesktop/DBus", "org.freedesktop.Notifications",
+    "ActionInvoked")
   msg.append(id)
   msg.append(action)
   discard self.bus.sendMessage msg
@@ -242,16 +307,15 @@ notificationFetcherDef.addMethod(GetCapabilities, [], [("capabilities", seq[stri
 notificationFetcherDef.addMethod(CloseNotification, [("id", uint32)], [])
 notificationFetcherDef.addMethod(GetServerInformation, [], [("name", string), ("url", string), ("version", string), ("number", string)])
 
-template setup(output: File, format = "nil", fileFormat, run = "nil",
-    iconPath = "nil", capabilities = @["body", "actions", "action-icons"]) =
+template setup(output: File, closeOutput: File = nil, format = "nil",
+    closeFormat = "nil", fileFormat = "nil", closeFileFormat = "nil",
+    run = "nil", closeRun = "nil", iconPath = "nil",
+    capabilities = @["body", "actions", "action-icons"]) =
   let bus {.inject.} = getBus(dbus.DBUS_BUS_SESSION)
 
-  let notificationFetcher {.inject.} = newNotificationFetcher(bus, output, format, fileFormat, run, iconPath, capabilities)
-  let notificationFetcherObj = newObjectImpl(bus)
-  notificationFetcherObj.addInterface("org.freedesktop.Notifications", notificationFetcherDef, notificationFetcher)
-
-  bus.requestName("org.freedesktop.Notifications")
-  bus.registerObject("/org/freedesktop/Notifications".ObjectPath, notificationFetcherObj)
+  let notificationFetcher {.inject.} = newNotificationFetcher(bus, output,
+    closeOutput, format, closeFormat, fileFormat, closeFileFormat, run,
+    closeRun, iconPath, capabilities)
 
 proc sendClose(id, reason: uint32) =
   setup(stdout)
@@ -261,21 +325,36 @@ proc sendAction(id: uint32, actionKey: string) =
   setup(stdout)
   notificationFetcher.invokeAction(id, actionKey)
 
-proc default(format, file, run, iconPath: string, capabilities: seq[string]) =
+proc default(format, file, run, closeRun, iconPath, closeFormat, closeFile: string, capabilities: seq[string]) =
   var
     fmt =
       if format == "nil": "{appName}: {summary} ({hints:urgency:low:normal:critical})"
       else: format
+    closeFmt =
+      if closeFormat == "nil": "{closesId}"
+      else: closeformat
     isFileFormat = (file.multiReplace(("{appName}", ""), ("{replacesId}", ""),
       ("{appIcon}", ""), ("{summary}", ""), ("{body}", ""),
-      ("{expireTimeout}", ""), ("{assignedId}", ""), ("{actions}", "")).len != file.len)
+      ("{expireTimeout}", ""), ("{id}", ""), ("{actions}", "")).len != file.len)
+    isCloseFileFormat = (closeFile.multiReplace(("{id}", "")).len != closeFile.len)
     output =
-      if isFileFormat or file.find("{hints") != -1:
+      if isFileFormat or file.find("{hints") != -1 or file.find("{time") != -1:
         nil
       else:
         if file == "nil": stdout
         else: open(file, fmAppend)
-  setup(output, fmt, file, run, iconPath, capabilities)
+    closeOutput =
+      if isCloseFileFormat or closeFile.find("{hints") != -1 or closeFile.find("{time") != -1:
+        nil
+      else:
+        if closeFile == "nil": output
+        else: open(closeFile, fmAppend)
+  setup(output, closeOutput, fmt, closeFmt, file, closeFile, run, closeRun, iconPath, capabilities)
+  let notificationFetcherObj = newObjectImpl(bus)
+  notificationFetcherObj.addInterface("org.freedesktop.Notifications", notificationFetcherDef, notificationFetcher)
+
+  bus.requestName("org.freedesktop.Notifications")
+  bus.registerObject("/org/freedesktop/Notifications".ObjectPath, notificationFetcherObj)
   let mainLoop = MainLoop.create(bus)
   mainLoop.runForever()
 
@@ -285,20 +364,26 @@ Notificatcher """ & NimblePkgVersion & """
 Freedesktop notifications interface. When run without arguments it will simply
 output all notifications to the terminal one notification per line. If supplied
 with arguments it can also send signals indicating that a notification was
-closed, or if an action was performed on the notification. This program will
-not do anything in particular with the CloseNotification message.
+closed, or if an action was performed on the notification. By specifying a
+closeFormat it will also output notification closed messages, if you're
+listening to these you should also use the send close functionality of
+notificatcher to report back to the parent notification that this was indeed
+closed. The same applies if you close messages based on their timeout.
 
 Usage:
   notificatcher [options] [<format>]
   notificatcher send <id> (close <reason> | action <action_key>)
 
 Options:
-  -h --help                Show this screen
-  -v --version             Show the version
-  -f --file <file>         File to output messages to
-  -r --run <program>       Program to run for each notification
-  -i --iconPath <path>     The path to store icons in
-  -c --capabilities <cap>  A list of capabilities to declare
+  -h --help                  Show this screen
+  -v --version               Show the version
+  -f --file <file>           File to output messages to
+  -m --closeFile <file>      File to output close messages to
+  -r --run <program>         Program to run for each notification
+  -x --closeRun <program>    Program to run for each close message
+  -d --closeFormat <format>  How to format notifications that have been closed
+  -i --iconPath <path>       The path to store icons in
+  -c --capabilities <cap>    A list of capabilities to declare
 
 If a filename with a replacement pattern is passed, the replacements will be
 done for every notification and the notification will be written into that
@@ -308,6 +393,9 @@ Error messages will always be written to stderr.
 
 The run parameter can be used to specify a program to be run for every
 notification. The program string can contain a replacement pattern.
+
+The close parameter can be used to specify a pattern for notification close
+events. This pattern only supports the id, file, and time replacements.
 
 The format that can be supplied is a fairly simple replacement pattern for how
 to output the notifications. It will perform these replacements:
@@ -319,7 +407,8 @@ to output the notifications. It will perform these replacements:
   newlines so should be somehow wrapped if you want to split the output into
   individual notifications.
 {expireTimeout} -> Expiry timeout
-{assignedId} -> The ID assigned to this notification
+{id} -> The ID assigned to this notification, or in the case of a closed
+  notification the ID of the notification to close.
 {actions} -> The list of actions, separated by commas
 {hints:<hint name>} -> A named hint from the table of hints, after the hint
   name you can also supply a list of strings separated by colons which will be
@@ -331,9 +420,22 @@ to output the notifications. It will perform these replacements:
   format is a string to format by, as specified in the Nim times module.
 {file} -> The name of the output file (this is not available when formatting a
   file name for obvious reasons).
+{pid} -> The process ID if a program was run with --run or --closeRun. Useful if
+  you want to kill a program later.
 
-If no format is specified, this format is used:
+If no format is specified, this format is used for notifications, and nothing is
+used for close messages:
   {appName}: {summary} ({hints:urgency:low:normal:critical})
+
+If {pid} is supplied as part of the output filter AND the file filter, then the
+program will be launched first (and {file} will be empty in the program filter)
+and then the filename will be generated and the output will be done.
+If {pid} is supplied as part of the output filter but not the file filter, then
+the filename will be generated, the program run (and {file} in the program
+filter will now point to a yet to be made file) and then the output will be
+written to the file.
+If {pid} is supplied as part of the file filter but not the output filter, then
+it behaves the same as if appeared in both.
 """
 when isMainModule:
   import docopt
@@ -344,4 +446,5 @@ when isMainModule:
   if not args.dispatchProc(sendClose, "send", "close") or
     args.dispatchProc(sendAction, "send", "action"):
     default($args["<format>"], $args["--file"], $args["--run"],
-      $args["--iconPath"], ($(args["--capabilities"])).split(","))
+    $args["--closeRun"], $args["--iconPath"], $args["--closeFormat"],
+    $args["--closeFile"], ($(args["--capabilities"])).split(","))
