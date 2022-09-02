@@ -6,7 +6,7 @@ set-up? Look no further!
 # What is Notificatcher
 Notificatcher is a very simple program that interfaces with dbus to read
 Freedesktop notifications and output them in whatever format you specify and run
-any program or script you desire.  Whether you want to simply dump them to a
+any program or script you desire. Whether you want to simply dump them to a
 file, or display them in a status bar or use a third-party program to make them
 pop up on screen is entirely up to you. Notificatcher is built to do a single
 task, and to do it well.
@@ -19,7 +19,7 @@ the shortcut to read notifications after they were gone. Nimdow, similarily to
 dwm and some other light-weight window managers have a status bar that supports
 reading the name of the root window and displaying it as a way of being able
 to add custom information to the bar. Nimdow also supports ANSI colours for
-this bar, so it's easy to customise it with some proper flare. While writing my
+this bar, so it's easy to customise it with some proper flair. While writing my
 status bar script I figured it could be cool if it could simply flash any
 recent notification instead of showing system data. This would mean that I no
 longer had any annoying pop ups to deal with from dunst, and it would still be
@@ -38,25 +38,30 @@ to run `less -r` with the notifications file before clearing it with
 Easiest way to figure it out is by checking out the help message:
 
 ```
-Notificatcher 0.4.0
-
+Notificatcher 0.5.0
 Freedesktop notifications interface. When run without arguments it will simply
 output all notifications to the terminal one notification per line. If supplied
 with arguments it can also send signals indicating that a notification was
-closed, or if an action was performed on the notification. This program will
-not do anything in particular with the CloseNotification message.
+closed, or if an action was performed on the notification. By specifying a
+closeFormat it will also output notification closed messages, if you're
+listening to these you should also use the send close functionality of
+notificatcher to report back to the parent notification that this was indeed
+closed. The same applies if you close messages based on their timeout.
 
 Usage:
   notificatcher [options] [<format>]
   notificatcher send <id> (close <reason> | action <action_key>)
 
 Options:
-  -h --help                Show this screen
-  -v --version             Show the version
-  -f --file <file>         File to output messages to
-  -r --run <program>       Program to run for each notification
-  -i --iconPath <path>     The path to store icons in
-  -c --capabilities <cap>  A list of capabilities to declare
+  -h --help                  Show this screen
+  -v --version               Show the version
+  -f --file <file>           File to output messages to
+  -m --closeFile <file>      File to output close messages to
+  -r --run <program>         Program to run for each notification
+  -x --closeRun <program>    Program to run for each close message
+  -d --closeFormat <format>  How to format notifications that have been closed
+  -i --iconPath <path>       The path to store icons in
+  -c --capabilities <cap>    A list of capabilities to declare
 
 If a filename with a replacement pattern is passed, the replacements will be
 done for every notification and the notification will be written into that
@@ -66,6 +71,9 @@ Error messages will always be written to stderr.
 
 The run parameter can be used to specify a program to be run for every
 notification. The program string can contain a replacement pattern.
+
+The close parameter can be used to specify a pattern for notification close
+events. This pattern only supports the id, file, and time replacements.
 
 The format that can be supplied is a fairly simple replacement pattern for how
 to output the notifications. It will perform these replacements:
@@ -77,7 +85,8 @@ to output the notifications. It will perform these replacements:
   newlines so should be somehow wrapped if you want to split the output into
   individual notifications.
 {expireTimeout} -> Expiry timeout
-{assignedId} -> The ID assigned to this notification
+{id} -> The ID assigned to this notification, or in the case of a closed
+  notification the ID of the notification to close.
 {actions} -> The list of actions, separated by commas
 {hints:<hint name>} -> A named hint from the table of hints, after the hint
   name you can also supply a list of strings separated by colons which will be
@@ -89,7 +98,20 @@ to output the notifications. It will perform these replacements:
   format is a string to format by, as specified in the Nim times module.
 {file} -> The name of the output file (this is not available when formatting a
   file name for obvious reasons).
+{pid} -> The process ID if a program was run with --run or --closeRun. Useful if
+  you want to kill a program later.
 
-If no format is specified, this format is used:
+If no format is specified, this format is used for notifications, and nothing is
+used for close messages:
   {appName}: {summary} ({hints:urgency:low:normal:critical})
+
+If {pid} is supplied as part of the output filter AND the file filter, then the
+program will be launched first (and {file} will be empty in the program filter)
+and then the filename will be generated and the output will be done.
+If {pid} is supplied as part of the output filter but not the file filter, then
+the filename will be generated, the program run (and {file} in the program
+filter will now point to a yet to be made file) and then the output will be
+written to the file.
+If {pid} is supplied as part of the file filter but not the output filter, then
+it behaves the same as if appeared in both.
 ```
