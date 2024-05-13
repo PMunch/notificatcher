@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.5.0"
+version       = "0.5.1"
 author        = "PMunch"
 description   = "Small program to read freedesktop notifications and format them as strings"
 license       = "MIT"
@@ -13,5 +13,5 @@ bin           = @["notificatcher"]
 
 requires "nim >= 1.2.6"
 requires "dbus"
-requires "https://github.com/PMunch/docopt.nim#dispatch"
+requires "docopt"
 requires "nimPNG"

@@ -17,8 +17,6 @@ type NotificationFetcher = ref object
   iconPath: string
   capabilities: seq[string]
 
-var capabilites: seq[string]
-
 proc newNotificationFetcher(bus: Bus, output, closeOutput: File,
     format, closeFormat, fileFormat, closeFileFormat, runFormat, closeRunFormat,
     iconPath: string, capabilities: seq[string]): NotificationFetcher =
@@ -34,7 +32,7 @@ proc newNotificationFetcher(bus: Bus, output, closeOutput: File,
   result.runFormat = runFormat
   result.closeRunFormat = closeRunFormat
   result.iconPath = iconPath
-  result.capabilities = capabilites
+  result.capabilities = capabilities
 
 proc `$`*(val: DbusValue): string =
   case val.kind

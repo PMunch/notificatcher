@@ -38,7 +38,7 @@ to run `less -r` with the notifications file before clearing it with
 Easiest way to figure it out is by checking out the help message:
 
 ```
-Notificatcher 0.5.0
+Notificatcher 0.5.1
 Freedesktop notifications interface. When run without arguments it will simply
 output all notifications to the terminal one notification per line. If supplied
 with arguments it can also send signals indicating that a notification was
